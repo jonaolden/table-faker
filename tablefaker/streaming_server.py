@@ -144,12 +144,12 @@ class StreamingTableGenerator:
             batch_config['start_row_id'] = self.current_row_id
             
             util.log(f"[{self.table_name}] Generating {self.rows_per_tick} rows "
-                    f"starting at row_id {self.current_row_id}", 
+                    f"starting at row_id {self.current_row_id}",
                     util.FOREGROUND_COLOR.CYAN)
             
             # Generate rows using TableFaker
             df = self.table_faker.generate_table(
-                batch_config, 
+                batch_config,
                 self.configurator,
                 internal_start_row_id=0,
                 internal_row_count=self.rows_per_tick
@@ -240,26 +240,94 @@ class StreamingServer:
             self.table_faker._apply_seed(seed)
             util.log(f"Applied seed: {seed}", util.FOREGROUND_COLOR.GREEN)
         
-        # Create generators for each table
-        self.generators: List[StreamingTableGenerator] = []
-        
-        # Process tables in dependency order (parents before children)
-        tables = self.configurator.config['tables']
-        
+        # Create generators mapped by table name
+        self.generators_by_name = {}
+        tables = self.configurator.config.get('tables', [])
         for table_config in tables:
-            generator = StreamingTableGenerator(
+            gen = StreamingTableGenerator(
                 table_config,
                 self.table_faker,
                 self.configurator,
                 self.output_path
             )
-            self.generators.append(generator)
-        
+            self.generators_by_name[table_config.get('table_name')] = gen
+
+        # Order generators deterministically based on FK dependencies (parents before children)
+        # actual ordering logic is implemented as class methods outside __init__
+        self.generators = self._order_generators()
+
         # Set up signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
-        
+
         self.running = False
+    def _extract_dependencies(self):
+        """Return dict table_name -> set(parent_table_names) parsed from foreign_key calls."""
+        tables = self.configurator.config.get('tables', [])
+        deps = {}
+        for t in tables:
+            name = t.get('table_name')
+            deps.setdefault(name, set())
+            for col in t.get('columns', []):
+                cmd = str(col.get('data', ''))
+                if 'foreign_key(' in cmd:
+                    try:
+                        idx = cmd.find('foreign_key(')
+                        end_idx = cmd.find(')', idx)
+                        if end_idx != -1:
+                            args_str = cmd[idx + len('foreign_key('):end_idx]
+                            parsed = eval(f"({args_str})")
+                            if len(parsed) >= 1:
+                                parent = parsed[0]
+                                deps[name].add(parent)
+                    except Exception:
+                        # ignore parse errors here
+                        pass
+        return deps
+
+    def _topological_sort(self, deps):
+        """
+        Kahn's algorithm adapted: deps maps node -> set(parents).
+        Produce ordered list of generator objects such that parents come before children.
+        """
+        # Build set of all nodes
+        nodes = set(deps.keys()) | {p for parents in deps.values() for p in parents}
+        # Build children map and in-degree
+        children = {n: set() for n in nodes}
+        indeg = {n: 0 for n in nodes}
+        for node, parents in deps.items():
+            for p in parents:
+                children.setdefault(p, set()).add(node)
+                indeg[node] = indeg.get(node, 0) + 1
+        # Start with nodes that have zero in-degree (no parents)
+        queue = [n for n in nodes if indeg.get(n, 0) == 0]
+        order = []
+        while queue:
+            n = queue.pop(0)
+            if n in self.generators_by_name:
+                order.append(self.generators_by_name[n])
+            for c in children.get(n, set()):
+                indeg[c] -= 1
+                if indeg[c] == 0:
+                    queue.append(c)
+        configured_count = len(self.generators_by_name)
+        if len(order) != configured_count:
+            missing = [name for name in self.generators_by_name.keys() if name not in [g.table_name for g in order]]
+            raise Exception(f"Circular or missing dependencies detected among tables; unresolved: {missing}")
+        return order
+
+    def _order_generators(self):
+        deps = self._extract_dependencies()
+        try:
+            ordered = self._topological_sort(deps)
+            util.log(f"Tables will start in dependency order: {[g.table_name for g in ordered]}", util.FOREGROUND_COLOR.CYAN)
+            return ordered
+        except Exception as e:
+            util.log(f"Dependency ordering failed: {e}", util.FOREGROUND_COLOR.RED)
+            util.log("Falling back to config order", util.FOREGROUND_COLOR.YELLOW)
+            # fallback: preserve config order for tables present
+            return [self.generators_by_name[name] for name in [t.get('table_name') for t in self.configurator.config.get('tables', [])] if name in self.generators_by_name]
+
     
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals."""
@@ -269,14 +337,26 @@ class StreamingServer:
     
     def start(self):
         """Start all table generators."""
-        util.log(f"Starting streaming server with {len(self.generators)} tables", 
+        util.log(f"Starting streaming server with {len(self.generators)} tables",
                 util.FOREGROUND_COLOR.GREEN)
         
         # Load existing data into caches first
         for generator in self.generators:
             generator.load_existing_data()
         
-        # Start all generators
+        # Generate initial batch for parent tables (those with no FK dependencies)
+        # This ensures their primary key caches are populated before children start
+        deps = self._extract_dependencies()
+        for generator in self.generators:
+            if generator.update_policy != 'disabled' and generator.enabled:
+                # Check if this table has no dependencies (is a parent/root table)
+                table_deps = deps.get(generator.table_name, set())
+                if not table_deps and generator.table_name not in self.table_faker.primary_key_cache:
+                    util.log(f"[{generator.table_name}] Generating initial batch to populate cache before starting threads",
+                            util.FOREGROUND_COLOR.CYAN)
+                    generator.generate_and_append_batch()
+        
+        # Now start all generator threads in dependency order
         for generator in self.generators:
             generator.start()
         

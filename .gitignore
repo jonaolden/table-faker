@@ -142,3 +142,6 @@ dev/
 domains/*/output
 
 .vscode/
+
+./delta_tables
+delta_tables

@@ -60,10 +60,8 @@ Notes:
 
 Advanced features:
 - Relationships YAML extraction — generate a yaml file with inferred table relationships with --relationships. See [`docs/relationships.md`](docs/relationships.md:1).
+- Streaming server — continuous, dependency-aware streaming to Delta/Parquet using [`table-faker/tablefaker/streaming_server.py`](table-faker/tablefaker/streaming_server.py:1). The server bootstraps parent tables to populate primary key caches before starting child generators; see detailed usage in [`docs/streaming-server.md`](docs/streaming-server.md:1).
 - Semantic View YAML generation — produce Snowflake-compatible semantic view YAML with --semantic-view. See [`docs/semantic-view.md`](docs/semantic-view.md:1).
   Note: Semantic view generation uses LLM to provide descriptions, requiring an `llm.config` (see [`docs/llm-config.md`](docs/llm-config.md:1) and [`table-faker/llm.config.example`](table-faker/llm.config.example:1)).
 - Plugin provider loading — add packages or local modules via `config.python_import` and register community providers in `config.community_providers`. See [`docs/custom-providers.md`](docs/custom-providers.md:1) and [`table-faker/tablefaker/plugin_loader.py`](table-faker/tablefaker/plugin_loader.py:1).
-- Custom foreign-key distributions — support for distributions such as `zipf` and `weighted_parent` for realistic FK sampling. See [`docs/distributions.md`](docs/distributions.md:1) and [`dev/instructions.md`](dev/instructions.md:1).
-- Enhanced CLI features — seed control, `--infer-attrs`, `--relationships`, `--semantic-view`, `--generate-metrics`, and other flags. See [`table-faker/tablefaker/cli.py`](table-faker/tablefaker/cli.py:1).
-- Copy-from-FK expression logic — use `copy_from_fk(...)` and the `auto` inference mode to copy attributes from parent rows. See [`docs/relationships.md`](docs/relationships.md:1) and [`table-faker/tablefaker/tablefaker.py`](table-faker/tablefaker/tablefaker.py:1).
-- Business metrics generation — derive business metrics from semantic view generation (LLM-assisted). See [`docs/metrics.md`](docs/metrics.md:1) and [`table-faker/tablefaker/semantic_model_metrics.py`](table-faker/tablefaker/semantic_model_metrics.py:1).
+

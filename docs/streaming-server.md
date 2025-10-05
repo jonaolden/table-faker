@@ -108,8 +108,10 @@ StreamingServer
 1. Load YAML config and apply seed
 2. Create `StreamingTableGenerator` per table
 3. Load existing Delta tables into `primary_key_cache` and `parent_rows` (see [`streaming_server.py`](streaming_server.py:97))
-4. Start generation threads for enabled tables
-5. Each thread generates batches at `tick_interval` (10 seconds)
+4. Determine table dependency order (parents before children) by parsing foreign_key calls
+5. Generate an initial batch synchronously for parent/root tables without existing cache to bootstrap primary keys
+6. Start generation threads for enabled tables in dependency order
+7. Each thread generates batches at `tick_interval` (10 seconds)
 
 ### FK Consistency
 
@@ -231,12 +233,16 @@ CMD ["python", "examples/streaming_server.py", \
 
 ### "Missing parent row" Error
 
-**Cause**: Child table references FK before parent table generated rows.
+**Cause**: Previously, a child table could reference a foreign key before the parent table had populated its primary key cache. The server now bootstraps parent tables at startup to avoid this. If this error still occurs, it indicates a configuration or naming mismatch.
 
-**Solution**: 
-1. Ensure parent tables are listed first in YAML
-2. Set parent `row_count` > 0 for initial generation
-3. Check startup logs confirm parent cache loaded
+**Solutions**:
+1. Verify parent tables exist and that the primary key column is marked with `is_primary_key` in the config.
+2. Ensure table names used in `foreign_key()` calls match the table_name exactly (case-sensitive).
+3. Set parent `row_count` > 0 so initial generated rows are available when starting the server.
+4. Inspect startup logs for messages:
+   - `Tables will start in dependency order` — shows resolved ordering
+   - `Generating initial batch to populate cache` — confirms bootstrap run for parent tables
+   - `Cache loaded, next row_id` — confirms existing data was loaded into cache
 
 ### High Memory Usage
 
