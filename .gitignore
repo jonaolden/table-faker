@@ -140,3 +140,5 @@ tests/.DS_Store
 dev/
 
 domains/*/output
+
+.vscode/

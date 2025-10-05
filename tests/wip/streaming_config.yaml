@@ -1,0 +1,67 @@
+version: 1
+config:
+  locale: en_US
+  seed: 42  # deterministic generation
+tables:
+  - table_name: person
+    row_count: 100
+    start_row_id: 1
+    update_policy: append        # options: append | disabled | replace
+    cadence:
+      rows_per_minute: 60        # generate 60 rows per minute
+      enabled: true
+    columns:
+      - column_name: id
+        data: row_id
+        is_primary_key: true
+      - column_name: first_name
+        data: fake.first_name()
+        type: string
+      - column_name: last_name
+        data: fake.last_name()
+        type: string
+      - column_name: email
+        data: fake.email()
+        type: string
+      - column_name: age
+        data: fake.random_int(18, 90)
+        type: int32
+      - column_name: created_at
+        data: datetime.now().isoformat()
+        type: string
+
+  - table_name: orders
+    row_count: 50
+    start_row_id: 1
+    update_policy: append
+    cadence:
+      rows_per_minute: 120       # generate 120 rows per minute (more frequent)
+      enabled: true
+    columns:
+      - column_name: order_id
+        data: row_id
+        is_primary_key: true
+      - column_name: person_id
+        data: foreign_key("person", "id")
+      - column_name: person_email
+        data: copy_from_fk("person_id", "person", "email")
+      - column_name: amount
+        data: fake.pyfloat(left_digits=3, right_digits=2, positive=True)
+        type: float
+      - column_name: status
+        data: random.choice(["pending", "completed", "cancelled"])
+        type: string
+      - column_name: created_at
+        data: datetime.now().isoformat()
+        type: string
+
+  - table_name: country
+    row_count: 10
+    update_policy: disabled      # static reference table, never update
+    columns:
+      - column_name: country_code
+        data: fake.country_code()
+        is_primary_key: true
+      - column_name: country_name
+        data: fake.country()
+        type: string

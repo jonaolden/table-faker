@@ -1,0 +1,673 @@
+name: HOTEL_SEMANTIC_VIEW
+description: This semantic model supports hospitality operations and financial analytics
+  by combining hotel, room, amenity, guest, staff, reservation, reservation_amenity,
+  invoice, payment and room_monthly_aggregate data. It enables reporting on occupancy
+  and booking trends, amenity usage, revenue and payments, guest behavior, staff performance,
+  and room-level monthly performance.
+tables:
+- name: HOTEL
+  description: Represents individual hotel properties, storing each property's identifier
+    and name along with contact and location details (street address, city, state
+    abbreviation, postcode, phone), plus a rating and the date the hotel opened.
+  base_table:
+    database: <database>
+    schema: <schema>
+    table: HOTEL
+  primary_key:
+    columns:
+    - HOTEL_ID
+  dimensions:
+  - name: HOTEL_ID
+    description: Foreign key reference to hotel
+    expr: HOTEL_ID
+    data_type: VARCHAR(16777216)
+  - name: NAME
+    description: The hotel’s public-facing commercial name used in marketing, reservations,
+      and guest communications. It serves as the primary identifier for reporting,
+      search, and customer-facing displays.
+    expr: NAME
+    data_type: VARCHAR(16777216)
+  - name: STREET_ADDRESS
+    description: Street-level mailing address for the hotel, including number, street
+      name, and unit/suite when applicable. Used for correspondence, geocoding, and
+      location-based analysis.
+    expr: STREET_ADDRESS
+    data_type: VARCHAR(16777216)
+  - name: CITY
+    description: The city in which the hotel is located, used for geographic segmentation,
+      reporting, and market analysis. It enables regional grouping for performance
+      metrics, pricing strategies, and targeted marketing.
+    expr: CITY
+    data_type: VARCHAR(16777216)
+  - name: STATE_ABBR
+    description: Two-letter U.S. state postal abbreviation indicating the state where
+      the hotel is located. Used for regional reporting, filtering, and aggregating
+      hotel performance and inventory by state.
+    expr: STATE_ABBR
+    data_type: VARCHAR(16777216)
+  - name: POSTCODE
+    description: Postal code for the hotel's physical address, used to identify its
+      geographic area. It supports market segmentation, regional reporting, delivery/routing
+      decisions, and location-based analytics.
+    expr: POSTCODE
+    data_type: VARCHAR(16777216)
+  - name: PHONE
+    description: Primary contact phone number for the hotel, used by guests and partners
+      to reach the front desk, reservations, or customer service.
+    expr: PHONE
+    data_type: VARCHAR(16777216)
+  time_dimensions:
+  - name: OPENED_DATE
+    description: The date the hotel first opened to guests. Used to assess property
+      age and operational tenure for lifecycle, valuation, and performance analyses.
+    expr: OPENED_DATE
+    data_type: VARCHAR(16777216)
+  facts:
+  - name: RATING
+    description: Overall guest satisfaction score for the hotel reflecting perceived
+      quality of service, amenities, and stay experience. Used to compare properties
+      and guide booking, pricing, and marketing decisions.
+    expr: rating
+    data_type: NUMBER(38,1)
+    access_modifier: public_access
+  metrics:
+  - name: AVG_HOTEL_RATING
+    description: Average overall guest satisfaction score for hotels.
+    expr: AVG(HOTEL.RATING)
+    access_modifier: public_access
+- name: ROOM
+  description: Stores records of individual hotel rooms, including identifiers and
+    location details (room_id, hotel_id, room_number, floor). It also captures room
+    attributes such as room_type, capacity, base_rate, and whether smoking is permitted.
+  base_table:
+    database: <database>
+    schema: <schema>
+    table: ROOM
+  primary_key:
+    columns:
+    - ROOM_ID
+  dimensions:
+  - name: ROOM_ID
+    description: Foreign key reference to room
+    expr: ROOM_ID
+    data_type: VARCHAR(16777216)
+  - name: HOTEL_ID
+    description: Foreign key reference to hotel
+    expr: HOTEL_ID
+    data_type: VARCHAR(16777216)
+  - name: ROOM_NUMBER
+    description: A three-digit room identifier used by staff and guests to reference
+      and locate specific rooms within a property for reservations, housekeeping,
+      and operational tasks.
+    expr: ROOM_NUMBER
+    data_type: VARCHAR(16777216)
+  - name: FLOOR
+    description: Indicates the building floor where the room is located, used for
+      operational grouping and reporting such as occupancy tracking, maintenance scheduling,
+      and location-based analytics.
+    expr: FLOOR
+    data_type: VARCHAR(16777216)
+  - name: ROOM_TYPE
+    description: The room_type column categorizes each room into business-defined
+      classes (standard, deluxe, suite, family, accessible) to drive pricing, availability,
+      performance reporting, and customer segmentation.
+    expr: ROOM_TYPE
+    data_type: VARCHAR(16777216)
+  - name: IS_SMOKING
+    description: Indicates if the room is designated as smoking-permitted. This informs
+      guest booking preferences, cleaning and regulatory requirements, and pricing
+      or inventory allocation.
+    expr: IS_SMOKING
+    data_type: VARCHAR(16777216)
+  facts:
+  - name: CAPACITY
+    description: Maximum number of guests the room is intended to accommodate for
+      booking, pricing, and occupancy planning (e.g., suites 4, family rooms 5, accessible
+      and standard rooms 2).
+    expr: capacity
+    data_type: NUMBER(38,0)
+    access_modifier: public_access
+  - name: BASE_RATE
+    description: The base nightly price for the room, representing the starting rate
+      determined by room type. This rate is increased for higher-rated hotels to reflect
+      premium positioning.
+    expr: base_rate
+    data_type: NUMBER(38,2)
+    access_modifier: public_access
+- name: AMENITY
+  description: Represents amenities offered for properties or bookings, storing each
+    amenity's unique ID, name, nightly price, and a flag indicating whether the amenity
+    is included in the base rate or billed separately.
+  base_table:
+    database: <database>
+    schema: <schema>
+    table: AMENITY
+  primary_key:
+    columns:
+    - AMENITY_ID
+  dimensions:
+  - name: AMENITY_ID
+    description: Foreign key reference to amenity
+    expr: AMENITY_ID
+    data_type: VARCHAR(16777216)
+  - name: NAME
+    description: The amenity.name field indicates the specific amenity offered (e.g.,
+      breakfast, parking, wifi_premium, spa_access) and is used to categorize and
+      report on services, availability, and related fees across properties.
+    expr: NAME
+    data_type: VARCHAR(16777216)
+  - name: INCLUDED
+    description: Indicates whether the amenity is included in the base offering (true
+      for premium Wi‑Fi and gym access) or must be purchased separately.
+    expr: INCLUDED
+    data_type: VARCHAR(16777216)
+  facts:
+  - name: PRICE_PER_NIGHT
+    description: The nightly fee charged for this amenity, representing the cost a
+      guest pays per night to use or rent it.
+    expr: price_per_night
+    data_type: NUMBER(38,2)
+    access_modifier: public_access
+- name: GUEST
+  description: Represents individual guests/customers, keyed by guest_id, and stores
+    their identity and contact details (first_name, last_name, full_name, email, phone)
+    along with loyalty membership status and accumulated loyalty_points.
+  base_table:
+    database: <database>
+    schema: <schema>
+    table: GUEST
+  primary_key:
+    columns:
+    - GUEST_ID
+  dimensions:
+  - name: GUEST_ID
+    description: Foreign key reference to guest
+    expr: GUEST_ID
+    data_type: VARCHAR(16777216)
+  - name: FIRST_NAME
+    description: The guest's given (first) name used to personalize communications
+      and identify individuals in bookings and interactions. It supports customer-facing
+      messages, segmentation, and reporting.
+    expr: FIRST_NAME
+    data_type: VARCHAR(16777216)
+  - name: LAST_NAME
+    description: The guest’s family or surname used to identify, address, and group
+      individuals for reporting, personalization, and customer segmentation.
+    expr: LAST_NAME
+    data_type: VARCHAR(16777216)
+  - name: FULL_NAME
+    description: The guest's full name (first and last), used to identify and address
+      the individual in bookings, communications, and reporting.
+    expr: FULL_NAME
+    data_type: VARCHAR(16777216)
+  - name: EMAIL
+    description: The guest’s primary contact email address used to send confirmations,
+      notifications, and marketing communications. It also serves as a key identifier
+      for contacting and linking guest records.
+    expr: EMAIL
+    data_type: VARCHAR(16777216)
+  - name: PHONE
+    description: Guest's primary contact phone number used to reach them for reservations,
+      confirmations, notifications, and customer support.
+    expr: PHONE
+    data_type: VARCHAR(16777216)
+  - name: LOYALTY_MEMBER
+    description: Indicates whether the guest is enrolled in the loyalty program. Used
+      for customer segmentation, targeted promotions, and tracking differences in
+      behavior between members and non-members.
+    expr: LOYALTY_MEMBER
+    data_type: VARCHAR(16777216)
+  facts:
+  - name: LOYALTY_POINTS
+    description: Total loyalty points accrued by a guest for redemption in the loyalty
+      program; non-members have a value of zero. This metric reflects customer engagement
+      and is used to determine rewards, tier eligibility, and targeted promotions.
+    expr: loyalty_points
+    data_type: NUMBER(38,0)
+    access_modifier: public_access
+- name: STAFF
+  description: Represents hotel staff members and their employment records; it stores
+    each employee's unique staff_id, associated hotel_id, full_name, role, hire_date,
+    and salary for payroll and staffing management.
+  base_table:
+    database: <database>
+    schema: <schema>
+    table: STAFF
+  primary_key:
+    columns:
+    - STAFF_ID
+  dimensions:
+  - name: STAFF_ID
+    description: Foreign key reference to staff
+    expr: STAFF_ID
+    data_type: VARCHAR(16777216)
+  - name: HOTEL_ID
+    description: Foreign key reference to hotel
+    expr: HOTEL_ID
+    data_type: VARCHAR(16777216)
+  - name: FULL_NAME
+    description: The full_name column captures each staff member’s full display name
+      (typically first and last) used to identify and reference employees across HR,
+      payroll, scheduling, and reporting.
+    expr: FULL_NAME
+    data_type: VARCHAR(16777216)
+  - name: ROLE
+    description: Indicates each staff member’s primary job function (e.g., front_desk,
+      housekeeping, manager, concierge, maintenance, chef), used to categorize personnel
+      for scheduling, reporting, and operational planning.
+    expr: ROLE
+    data_type: VARCHAR(16777216)
+  time_dimensions:
+  - name: HIRE_DATE
+    description: The date a staff member began employment, used to track tenure, benefit
+      eligibility, and employment history for workforce analysis.
+    expr: HIRE_DATE
+    data_type: VARCHAR(16777216)
+  facts:
+  - name: SALARY
+    description: The annual salary paid to each staff member, used for payroll, budgeting
+      and compensation analysis and reflecting differences in pay across roles.
+    expr: salary
+    data_type: NUMBER(38,2)
+    access_modifier: public_access
+- name: RESERVATION
+  description: Represents individual hotel room bookings, linking reservation IDs
+    to room, hotel, and guest records and capturing stay dates, length, and occupancy
+    (adults, children). It also stores pricing and payment details including room
+    rate, estimated amenities, subtotal, tax rate/amount, total amount, booking channel,
+    and payment status.
+  base_table:
+    database: <database>
+    schema: <schema>
+    table: RESERVATION
+  primary_key:
+    columns:
+    - RESERVATION_ID
+  dimensions:
+  - name: RESERVATION_ID
+    description: Foreign key reference to reservation
+    expr: RESERVATION_ID
+    data_type: VARCHAR(16777216)
+  - name: ROOM_ID
+    description: Foreign key reference to room
+    expr: ROOM_ID
+    data_type: VARCHAR(16777216)
+  - name: HOTEL_ID
+    description: Foreign key reference to hotel
+    expr: HOTEL_ID
+    data_type: VARCHAR(16777216)
+  - name: GUEST_ID
+    description: Foreign key reference to guest
+    expr: GUEST_ID
+    data_type: VARCHAR(16777216)
+  - name: CHECK_IN
+    description: The scheduled arrival date and time for the reservation, marking
+      the start of the guest's stay. It is used for occupancy planning, room assignment,
+      and revenue allocation.
+    expr: CHECK_IN
+    data_type: VARCHAR(16777216)
+  - name: CHECK_OUT
+    description: The scheduled departure date for a reservation—the day the booking
+      ends—calculated as the check‑in date plus the booked stay length. It’s used
+      to determine room availability and billing cutoff.
+    expr: CHECK_OUT
+    data_type: VARCHAR(16777216)
+  - name: ADULTS
+    description: The number of adult guests included in the reservation, typically
+      recorded as 1 or 2.
+    expr: ADULTS
+    data_type: VARCHAR(16777216)
+  - name: CHILDREN
+    description: Number of children included in the reservation (0–3), used for pricing,
+      room allocation, and capacity and amenity planning.
+    expr: CHILDREN
+    data_type: VARCHAR(16777216)
+  - name: BOOKING_CHANNEL
+    description: Specifies how a guest booked the reservation (direct, OTA, corporate,
+      or phone), used to segment bookings, analyze channel performance, and inform
+      marketing and distribution strategy.
+    expr: BOOKING_CHANNEL
+    data_type: VARCHAR(16777216)
+  - name: PAYMENT_STATUS
+    description: Indicates whether a reservation’s payment has been completed ("paid"),
+      not received ("unpaid"), or is awaiting confirmation ("pending"), used to monitor
+      revenue collection and determine eligibility for fulfillment or follow-up.
+    expr: PAYMENT_STATUS
+    data_type: VARCHAR(16777216)
+  facts:
+  - name: STAY_LENGTH
+    description: Number of consecutive nights booked for the reservation, representing
+      the guest's length of stay (1–14 nights). This value is used to assess occupancy,
+      revenue and scheduling for the reservation.
+    expr: stay_length
+    data_type: NUMBER(38,0)
+    access_modifier: public_access
+  - name: ROOM_RATE
+    description: The base rate charged for the reserved room (copied from the room's
+      base_rate), representing the standard nightly price applied to the reservation.
+    expr: room_rate
+    data_type: NUMBER(38,2)
+    access_modifier: public_access
+  - name: ESTIMATED_AMENITIES_TOTAL
+    description: Estimated total cost of amenities associated with the reservation,
+      reflecting the projected amount customers will be charged for ancillary services
+      (e.g., parking, Wi‑Fi, breakfast). Used for pricing previews and revenue estimates.
+    expr: estimated_amenities_total
+    data_type: NUMBER(38,2)
+    access_modifier: public_access
+  - name: SUBTOTAL
+    description: Total estimated base charge for the reservation—room charges plus
+      estimated amenities—rounded to two decimal places.
+    expr: subtotal
+    data_type: NUMBER(38,2)
+    access_modifier: public_access
+  - name: TAX_RATE
+    description: The percentage tax rate applied to a reservation’s taxable charges,
+      used to calculate the tax amount (e.g., 12%).
+    expr: tax_rate
+    data_type: NUMBER(38,2)
+    access_modifier: public_access
+  - name: TAX_AMOUNT
+    description: The total sales tax charged for the reservation, representing the
+      monetary tax collected based on the reservation subtotal and applicable tax
+      rate.
+    expr: tax_amount
+    data_type: NUMBER(38,2)
+    access_modifier: public_access
+  - name: TOTAL_AMOUNT
+    description: Total amount billed for the reservation, representing the subtotal
+      plus applicable taxes and rounded to two decimal places.
+    expr: total_amount
+    data_type: NUMBER(38,2)
+    access_modifier: public_access
+  metrics:
+  - name: AVG_RESERVATION_STAY_LENGTH
+    description: Average number of nights booked per reservation.
+    expr: AVG(RESERVATION.STAY_LENGTH)
+    access_modifier: public_access
+  - name: TOTAL_RESERVATION_AMOUNT
+    description: Total amount billed for reservations.
+    expr: SUM(RESERVATION.TOTAL_AMOUNT)
+    access_modifier: public_access
+  - name: COUNT_RESERVATIONS
+    description: Count of reservations (non-null stay_length values).
+    expr: COUNT(RESERVATION.STAY_LENGTH)
+    access_modifier: public_access
+- name: RESERVATION_AMENITY
+  description: This table represents amenities attached to a reservation, linking
+    a specific amenity to a reservation and capturing how many nights it applies and
+    the charge for that amenity. Each row is identified by reservation_amenity_id
+    and includes reservation_id, amenity_id, nights, and amount.
+  base_table:
+    database: <database>
+    schema: <schema>
+    table: RESERVATION_AMENITY
+  primary_key:
+    columns:
+    - RESERVATION_AMENITY_ID
+  dimensions:
+  - name: RESERVATION_AMENITY_ID
+    description: Foreign key reference to reservation_amenity
+    expr: RESERVATION_AMENITY_ID
+    data_type: VARCHAR(16777216)
+  - name: RESERVATION_ID
+    description: Foreign key reference to reservation
+    expr: RESERVATION_ID
+    data_type: VARCHAR(16777216)
+  - name: AMENITY_ID
+    description: Foreign key reference to amenity
+    expr: AMENITY_ID
+    data_type: VARCHAR(16777216)
+  facts:
+  - name: NIGHTS
+    description: Number of nights the guest is booked to stay for the reservation,
+      used to determine length of stay for billing, occupancy, and reporting.
+    expr: nights
+    data_type: NUMBER(38,0)
+    access_modifier: public_access
+  - name: AMOUNT
+    description: Total charge for the specified amenity on the reservation, calculated
+      as the amenity’s price per night multiplied by the number of nights and rounded
+      to two decimal places.
+    expr: amount
+    data_type: NUMBER(38,2)
+    access_modifier: public_access
+- name: INVOICE
+  description: Stores billing records for reservations, including invoice_id, linked
+    reservation_id, issue_date, monetary amounts (subtotal, tax_amount, total), and
+    a paid flag indicating whether the invoice has been settled.
+  base_table:
+    database: <database>
+    schema: <schema>
+    table: INVOICE
+  primary_key:
+    columns:
+    - INVOICE_ID
+  dimensions:
+  - name: INVOICE_ID
+    description: Foreign key reference to invoice
+    expr: INVOICE_ID
+    data_type: VARCHAR(16777216)
+  - name: RESERVATION_ID
+    description: Foreign key reference to reservation
+    expr: RESERVATION_ID
+    data_type: VARCHAR(16777216)
+  - name: PAID
+    description: Indicates whether the invoice has been settled based on the associated
+      reservation’s payment status. Marked true when the linked reservation is paid
+      and false otherwise.
+    expr: PAID
+    data_type: VARCHAR(16777216)
+  time_dimensions:
+  - name: ISSUE_DATE
+    description: The date the invoice was issued to the customer, representing when
+      the charge was generated. It is used to determine the billing period, payment
+      due dates, and timing for revenue recognition.
+    expr: ISSUE_DATE
+    data_type: VARCHAR(16777216)
+  facts:
+  - name: SUBTOTAL
+    description: The pre-tax, pre-fee amount billed on the invoice that mirrors the
+      reservation’s subtotal and serves as the base charge before taxes, discounts,
+      and additional fees.
+    expr: subtotal
+    data_type: NUMBER(38,2)
+    access_modifier: public_access
+  - name: TAX_AMOUNT
+    description: The tax_amount is the monetary tax charged on this invoice for the
+      associated reservation. It represents the portion of the total charge attributable
+      to sales tax, VAT, lodging tax, or other applicable taxes.
+    expr: tax_amount
+    data_type: NUMBER(38,2)
+    access_modifier: public_access
+  - name: TOTAL
+    description: Total amount billed on the invoice for the associated reservation,
+      representing the final charges owed (including applicable fees and taxes) for
+      that reservation.
+    expr: total
+    data_type: NUMBER(38,2)
+    access_modifier: public_access
+  metrics:
+  - name: TOTAL_INVOICE_TAX
+    description: Total tax amount collected on invoices.
+    expr: SUM(INVOICE.TAX_AMOUNT)
+    access_modifier: public_access
+- name: PAYMENT
+  description: Stores payment transactions for invoices or reservations, recording
+    payment_id, linked invoice_id and reservation_id, paid_amount, paid_date, and
+    payment method to track settlement details.
+  base_table:
+    database: <database>
+    schema: <schema>
+    table: PAYMENT
+  primary_key:
+    columns:
+    - PAYMENT_ID
+  dimensions:
+  - name: PAYMENT_ID
+    description: Foreign key reference to payment
+    expr: PAYMENT_ID
+    data_type: VARCHAR(16777216)
+  - name: INVOICE_ID
+    description: Foreign key reference to invoice
+    expr: INVOICE_ID
+    data_type: VARCHAR(16777216)
+  - name: RESERVATION_ID
+    description: Foreign key reference to reservation
+    expr: RESERVATION_ID
+    data_type: VARCHAR(16777216)
+  - name: METHOD
+    description: Indicates the payment channel used for each transaction (credit card,
+      cash, bank transfer, or mobile payment), used to analyze payment mix, associated
+      fees, and customer payment preferences.
+    expr: METHOD
+    data_type: VARCHAR(16777216)
+  time_dimensions:
+  - name: PAID_DATE
+    description: The calendar date on which a payment was made or recorded. Used to
+      track timing of receipts for billing, reporting, and reconciliation.
+    expr: PAID_DATE
+    data_type: VARCHAR(16777216)
+  facts:
+  - name: PAID_AMOUNT
+    description: The monetary amount recorded for this payment, representing the total
+      charge on the linked invoice.
+    expr: paid_amount
+    data_type: NUMBER(38,2)
+    access_modifier: public_access
+- name: ROOM_MONTHLY_AGGREGATE
+  description: Monthly aggregated performance and revenue metrics for each hotel room.
+    Each row records a hotel_id, room_id and month with counts of reservations, occupied
+    and available days, and both room-level and total revenue.
+  base_table:
+    database: <database>
+    schema: <schema>
+    table: ROOM_MONTHLY_AGGREGATE
+  dimensions:
+  - name: HOTEL_ID
+    description: Foreign key reference to hotel
+    expr: HOTEL_ID
+    data_type: VARCHAR(16777216)
+  - name: ROOM_ID
+    description: Foreign key reference to room
+    expr: ROOM_ID
+    data_type: VARCHAR(16777216)
+  - name: MONTH
+    description: The calendar month to which the room-level aggregate metrics apply.
+      It indicates the month that occupancy, revenue, and other performance measures
+      are reported for.
+    expr: MONTH
+    data_type: VARCHAR(16777216)
+  facts:
+  - name: NUMBER_OF_RESERVATIONS
+    description: Total number of reservations recorded for the room during the month,
+      indicating monthly booking volume and demand.
+    expr: number_of_reservations
+    data_type: NUMBER(38,0)
+    access_modifier: public_access
+  - name: OCCUPIED_DAYS
+    description: The total number of days the room was occupied during the month,
+      representing the room’s monthly utilization.
+    expr: occupied_days
+    data_type: NUMBER(38,0)
+    access_modifier: public_access
+  - name: NUMBER_OF_AVAILABLE_DAYS
+    description: Count of days within the aggregated month that the room was available
+      for booking. Used to calculate monthly availability and occupancy metrics.
+    expr: number_of_available_days
+    data_type: NUMBER(38,0)
+    access_modifier: public_access
+  - name: ROOM_REVENUE
+    description: Total room revenue for the month, i.e., the aggregate income from
+      room bookings during the calendar month used to measure monthly room sales performance.
+    expr: room_revenue
+    data_type: NUMBER(38,2)
+    access_modifier: public_access
+  - name: TOTAL_REVENUE
+    description: Total revenue generated by the room for the month, representing the
+      aggregated charges and related ancillary income (room rates, taxes/fees, and
+      add‑on services).
+    expr: total_revenue
+    data_type: NUMBER(38,2)
+    access_modifier: public_access
+  metrics:
+  - name: OCCUPANCY_RATE_PCT
+    description: Percentage of available room nights that were occupied during the
+      period.
+    expr: SUM(ROOM_MONTHLY_AGGREGATE.OCCUPIED_DAYS) * 100 / NULLIF(SUM(ROOM_MONTHLY_AGGREGATE.NUMBER_OF_AVAILABLE_DAYS),
+      0)
+    access_modifier: public_access
+  - name: AVERAGE_DAILY_RATE_ADR
+    description: Average revenue earned per occupied room night, reflecting pricing
+      per occupied room.
+    expr: SUM(ROOM_MONTHLY_AGGREGATE.ROOM_REVENUE) / NULLIF(SUM(ROOM_MONTHLY_AGGREGATE.OCCUPIED_DAYS),
+      0)
+    access_modifier: public_access
+  - name: REVENUE_PER_AVAILABLE_ROOM_REVPAR
+    description: Revenue generated per available room night combining occupancy and
+      rate performance.
+    expr: SUM(ROOM_MONTHLY_AGGREGATE.ROOM_REVENUE) / NULLIF(SUM(ROOM_MONTHLY_AGGREGATE.NUMBER_OF_AVAILABLE_DAYS),
+      0)
+    access_modifier: public_access
+  - name: REVPAR_INDEX_RGI
+    description: Property RevPAR expressed as an index versus the competitive set
+      (average RevPAR), where 100 = market parity.
+    expr: (SUM(ROOM_MONTHLY_AGGREGATE.ROOM_REVENUE) / NULLIF(SUM(ROOM_MONTHLY_AGGREGATE.NUMBER_OF_AVAILABLE_DAYS),
+      0)) / NULLIF(AVG(ROOM_MONTHLY_AGGREGATE.ROOM_REVENUE / NULLIF(ROOM_MONTHLY_AGGREGATE.NUMBER_OF_AVAILABLE_DAYS,
+      0)), 0) * 100
+    access_modifier: public_access
+  - name: GOPPAR
+    description: 'Gross operating profit per available room night: total room-level
+      revenue minus estimated monthly payroll, allocated per available room night.'
+    expr: (SUM(ROOM_MONTHLY_AGGREGATE.TOTAL_REVENUE) - SUM(STAFF.SALARY) / NULLIF(12,
+      0)) / NULLIF(SUM(ROOM_MONTHLY_AGGREGATE.NUMBER_OF_AVAILABLE_DAYS), 0)
+    access_modifier: public_access
+relationships:
+- name: ROOM_TO_HOTEL
+  left_table: ROOM
+  right_table: HOTEL
+  relationship_columns:
+  - left_column: HOTEL_ID
+    right_column: HOTEL_ID
+  relationship_type: many_to_one
+  join_type: left_outer
+- name: STAFF_TO_HOTEL
+  left_table: STAFF
+  right_table: HOTEL
+  relationship_columns:
+  - left_column: HOTEL_ID
+    right_column: HOTEL_ID
+  relationship_type: many_to_one
+  join_type: left_outer
+- name: RESERVATION_AMENITY_TO_RESERVATION
+  left_table: RESERVATION_AMENITY
+  right_table: RESERVATION
+  relationship_columns:
+  - left_column: RESERVATION_ID
+    right_column: RESERVATION_ID
+  relationship_type: many_to_one
+  join_type: left_outer
+- name: RESERVATION_AMENITY_TO_AMENITY
+  left_table: RESERVATION_AMENITY
+  right_table: AMENITY
+  relationship_columns:
+  - left_column: AMENITY_ID
+    right_column: AMENITY_ID
+  relationship_type: many_to_one
+  join_type: left_outer
+- name: INVOICE_TO_RESERVATION
+  left_table: INVOICE
+  right_table: RESERVATION
+  relationship_columns:
+  - left_column: RESERVATION_ID
+    right_column: RESERVATION_ID
+  relationship_type: many_to_one
+  join_type: left_outer
+- name: PAYMENT_TO_INVOICE
+  left_table: PAYMENT
+  right_table: INVOICE
+  relationship_columns:
+  - left_column: INVOICE_ID
+    right_column: INVOICE_ID
+  relationship_type: many_to_one
+  join_type: left_outer

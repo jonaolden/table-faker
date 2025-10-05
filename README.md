@@ -15,16 +15,68 @@
   - Excel
   - Delta Lake
 
-- **Schema Outputs**:
-  - Relationships YAML file
-  - Semantic view YAML file (partially Snowflake compatible)
-  - Business metrics from semantic view YAML file (partially Snowflake compatible)
-
 ## Installation
 Clone repository, then from the root folder, run:
 ```bash
 pip install -e .
 ```
+
+## Usage
+Run tablefaker in your terminal to automate fake data generation based on your YAML configuration.
+
+Supported CLI flags:
+
+Required flags:
+- --config : path to YAML or JSON config
+Optional flags:
+- --file_type : csv,json,parquet,excel,sql,deltalake (default: csv)
+- --target : target folder or file path
+- --seed : integer seed to make generation deterministic
+- --infer-attrs : "true" or "false" to override infer_entity_attrs_by_name
+- --relationships : generate relationships yaml file
+- --semantic-view : generate semantic view yaml file (Snowflake compatible)
+
+
+```bash
+# exports to current folder in csv format 
+tablefaker --config tests/test_table.yaml
+
+# exports as sql insert script files
+tablefaker --config tests/test_table.yaml --file_type sql --target ./out
+
+# exports to current folder in excel format
+tablefaker --config tests/test_table.yaml --file_type excel
+
+# exports all tables in json format to a folder
+tablefaker --config tests/test_table.yaml --file_type json --target ./target_folder
+
+# exports a single table to a parquet file
+tablefaker --config tests/test_table.yaml --file_type parquet --target ./target_folder/target_file.parquet
+
+# pass an explicit seed and enable attribute inference
+tablefaker --config tests/test_table.yaml --seed 42 --infer-attrs true
+```
+
+## Sample CSV Output
+```
+id,first_name,last_name,age,dob,salary,height,weight
+1,John,Smith,35,1992-01-11,,170 cm,150
+2,Charles,Shepherd,27,1987-01-02,,170 cm,150
+3,Troy,Johnson,42,,170 cm,150
+4,Joshua,Hill,86,1985-07-11,,170 cm,150
+5,Matthew,Johnson,31,1940-03-31,,170 cm,150
+```
+
+## Sample Sql Output
+```sql
+INSERT INTO employee
+(id,person_id,hire_date,title,salary,height,weight,school,level)
+VALUES
+(1, 4, '2020-10-09', 'principal engineer', NULL, '170 cm', 150, 'ISLIP HIGH SCHOOL', 'level 2'),
+(2, 9, '2002-12-20', 'principal engineer', NULL, '170 cm', 150, 'GUY-PERKINS HIGH SCHOOL', 'level 1'),
+(3, 2, '1996-01-06', 'principal engineer', NULL, '170 cm', 150, 'SPRINGLAKE-EARTH ELEM/MIDDLE SCHOOL', 'level 3');
+```
+
 
 ## YAML schema reference 
 
@@ -176,57 +228,7 @@ tables:
 [full yml example](tests/test_table.yaml)
 
 
-## Usage
-Run tablefaker in your terminal to automate fake data generation. The CLI reads the YAML config and supports importing Python modules via `config.python_import` and adding Faker community providers declared under `config.community_providers` (see "Custom Faker Providers" below). Custom Python functions are supported when placed in the target yaml directory.
 
-Supported CLI flags:
-- --config : path to YAML or JSON config
-- --file_type : csv,json,parquet,excel,sql,deltalake (default: csv)
-- --target : target folder or file path
-- --seed : integer seed to make generation deterministic
-- --infer-attrs : "true" or "false" to override infer_entity_attrs_by_name
-- -- relationships : generate relationships yaml file 
-- --semantic-view : generate semantic view yaml file (Snowflake compatible)
-
-```bash
-# exports to current folder in csv format 
-tablefaker --config tests/test_table.yaml
-
-# exports as sql insert script files
-tablefaker --config tests/test_table.yaml --file_type sql --target ./out
-
-# exports to current folder in excel format
-tablefaker --config tests/test_table.yaml --file_type excel
-
-# exports all tables in json format to a folder
-tablefaker --config tests/test_table.yaml --file_type json --target ./target_folder
-
-# exports a single table to a parquet file
-tablefaker --config tests/test_table.yaml --file_type parquet --target ./target_folder/target_file.parquet
-
-# pass an explicit seed and enable attribute inference
-tablefaker --config tests/test_table.yaml --seed 42 --infer-attrs true
-```
-
-## Sample CSV Output
-```
-id,first_name,last_name,age,dob,salary,height,weight
-1,John,Smith,35,1992-01-11,,170 cm,150
-2,Charles,Shepherd,27,1987-01-02,,170 cm,150
-3,Troy,Johnson,42,,170 cm,150
-4,Joshua,Hill,86,1985-07-11,,170 cm,150
-5,Matthew,Johnson,31,1940-03-31,,170 cm,150
-```
-
-## Sample Sql Output
-```sql
-INSERT INTO employee
-(id,person_id,hire_date,title,salary,height,weight,school,level)
-VALUES
-(1, 4, '2020-10-09', 'principal engineer', NULL, '170 cm', 150, 'ISLIP HIGH SCHOOL', 'level 2'),
-(2, 9, '2002-12-20', 'principal engineer', NULL, '170 cm', 150, 'GUY-PERKINS HIGH SCHOOL', 'level 1'),
-(3, 2, '1996-01-06', 'principal engineer', NULL, '170 cm', 150, 'SPRINGLAKE-EARTH ELEM/MIDDLE SCHOOL', 'level 3');
-```
 ## Custom Faker Providers
 You can add and use custom / community faker providers with table faker.\
 Here is a list of these community providers.\
@@ -289,6 +291,15 @@ tables:
       - column_name: level
         data: some_custom_function.get_level() # custom function
 ```
+
+- ***Other features***
+**Schema Generation** 
+To simplify the process of utilizing the generated data in downstream applications, particularly Snowflake, the following descriptive schema files can be produced:
+  - Relationships YAML file
+  - Business metrics from semantic view YAML file (Snowflake compatible semantic view)
+  - Semantic view YAML file (Snowflake compatible semantic view)
+
+
 ### TODO
 - Add support for full semantic model generation (Snowflake compatible)
 - Add support for inserting data into a database directly using dlt

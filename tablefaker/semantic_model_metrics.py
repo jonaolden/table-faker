@@ -26,11 +26,9 @@ def generate_model_metrics(semantic_view_path: str, llm_config_path: Optional[st
     # Initialize LLM client
     llm_client = LLMClient(llm_config_path)
     
-    if not llm_client.is_enabled():
-        raise RuntimeError(
-            "LLM is not enabled. Please configure llm.config with enabled: true "
-            "and proper API credentials to generate metrics."
-        )
+    # Proceed even if LLM is disabled. When disabled we will generate simple
+    # placeholder metrics (one per table that has facts). When enabled the
+    # LLM-based generation path will be used below.
     
     # Load semantic view
     with open(semantic_view_path, "r", encoding="utf-8") as f:
@@ -39,27 +37,109 @@ def generate_model_metrics(semantic_view_path: str, llm_config_path: Optional[st
     # Analyze the semantic model
     model_summary = _analyze_semantic_model(semantic_view)
     
-    # Generate metrics using LLM
-    metrics = _generate_metrics_with_llm(model_summary, llm_client, num_metrics)
+    # Generate metrics: if LLM is disabled, produce one placeholder metric per table
+    # that contains facts. Otherwise, use the LLM to generate metrics.
+    if not llm_client.is_enabled():
+        metrics = _generate_placeholder_metrics(model_summary)
+    else:
+        metrics = _generate_metrics_with_llm(model_summary, llm_client, num_metrics)
     
-    # Determine output path
+    # Inject metrics into the semantic view under their respective logical table.
+    # Metrics that reference a qualified column (table.column) or a table wildcard (table.*)
+    # are added to that logical table. Metrics without a recognizable table reference are
+    # added as model-level metrics.
+    def _upper_case_expr_tables(expr: str) -> str:
+        # Uppercase occurrences of table.column and table.* to match logical naming in the semantic view
+        # First uppercase explicit table.column references
+        expr = re.sub(
+            r'([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)',
+            lambda m: f"{m.group(1).upper()}.{m.group(2).upper()}",
+            expr
+        )
+        # Then uppercase table.* occurrences (e.g., COUNT(table.*))
+        expr = re.sub(
+            r'([A-Za-z0-9_]+)\.\*',
+            lambda m: f"{m.group(1).upper()}.*",
+            expr
+        )
+        return expr
+    
+    # Ensure semantic_view is a mapping and has tables
+    if isinstance(semantic_view, dict):
+        tables_list = semantic_view.get("tables", [])
+        # Do not pre-create an empty 'metrics' list here; only create it when we actually
+        # need to append a model-level metric. This avoids emitting a stub `metrics: []`
+        # in the YAML output when there are no model-level metrics.
+    
+        if isinstance(tables_list, list):
+            for metric in metrics:
+                expr = (metric.get("expr", "") or "").strip()
+    
+                inserted = False
+                # 1) Try explicit qualified column: table.column
+                match = re.search(r'([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)', expr)
+                table_ref = None
+                if match:
+                    table_ref = match.group(1).upper()
+    
+                # 2) If no qualified column, try table wildcard pattern: table.*
+                if table_ref is None:
+                    match_wild = re.search(r'([A-Za-z0-9_]+)\.\*', expr)
+                    if match_wild:
+                        table_ref = match_wild.group(1).upper()
+    
+                # 3) If we found a table reference, insert under that table
+                if table_ref:
+                    for table in tables_list:
+                        if table.get("name", "").upper() == table_ref:
+                            if "metrics" not in table or table.get("metrics") is None:
+                                table["metrics"] = []
+                            metric_entry = {
+                                "name": metric.get("name", "").upper(),
+                                "description": metric.get("description", ""),
+                                "expr": _upper_case_expr_tables(metric.get("expr", ""))
+                            }
+                            if "access_modifier" in metric:
+                                metric_entry["access_modifier"] = metric.get("access_modifier")
+                            table["metrics"].append(metric_entry)
+                            inserted = True
+                            break
+    
+                # If not inserted into a specific table, treat as model-level metric
+                if not inserted:
+                    metric_entry = {
+                        "name": metric.get("name", "").upper(),
+                        "description": metric.get("description", ""),
+                        "expr": _upper_case_expr_tables(metric.get("expr", ""))
+                    }
+                    if "access_modifier" in metric:
+                        metric_entry["access_modifier"] = metric.get("access_modifier")
+                    # Only create the metrics list when we actually need to append an item.
+                    semantic_view.setdefault("metrics", []).append(metric_entry)
+    
+    # Determine output path: if target_file_path omitted, overwrite the original semantic view
     base = path.splitext(path.basename(semantic_view_path))[0]
-    default_name = f"{base}_generated_metrics.yml"
+    default_name = f"{base}_semantic_view_with_metrics.yml"
     src_dir = path.dirname(semantic_view_path) or "."
     
     if target_file_path in (None, "", "."):
-        out_path = path.join(src_dir, default_name)
+        out_path = semantic_view_path  # overwrite original semantic view to include metrics
     else:
         out_path = path.join(target_file_path, default_name) if path.isdir(target_file_path) else target_file_path
     
-    # Write metrics YAML
+    # Write updated semantic view YAML (with injected metrics). Use same indentation as semantic_view generator.
+    with open(out_path, "w", encoding="utf-8") as f:
+        # Match semantic view indentation (2 spaces) for consistent output formatting.
+        yaml.safe_dump(semantic_view, f, sort_keys=False, default_flow_style=False, allow_unicode=True, indent=2)
+    
+    # Also write a standalone metrics file for compatibility
+    metrics_file = path.join(src_dir, f"{base}_generated_metrics.yml")
     metrics_yaml = {
         "metrics": metrics,
         "comments": f"Generated {len(metrics)} business metrics using LLM analysis of the semantic model"
     }
-    
-    with open(out_path, "w", encoding="utf-8") as f:
-        yaml.safe_dump(metrics_yaml, f, sort_keys=False, default_flow_style=False, allow_unicode=True)
+    with open(metrics_file, "w", encoding="utf-8") as f:
+        yaml.safe_dump(metrics_yaml, f, sort_keys=False, default_flow_style=False, allow_unicode=True, indent=2)
     
     return out_path
 
@@ -556,3 +636,23 @@ def _generate_fallback_metrics(model_summary: Dict) -> List[Dict]:
                 })
     
     return metrics[:5]  # Return max 5 fallback metrics
+    
+    
+def _generate_placeholder_metrics(model_summary: Dict) -> List[Dict]:
+    """Generate one placeholder metric per table that has facts when LLM is disabled."""
+    placeholders: List[Dict] = []
+    
+    for table_name, table_info in (model_summary.get("tables") or {}).items():
+        facts = table_info.get("facts", []) if isinstance(table_info, dict) else []
+        if not facts:
+            continue
+        # Create a simple count placeholder metric scoped to the table
+        metric_name = f"{table_name}_COUNT".upper()
+        placeholders.append({
+            "name": metric_name,
+            "description": f"Placeholder count metric for {table_name}",
+            "expr": f"COUNT({table_name}.*)",
+            "access_modifier": "public_access"
+        })
+    
+    return placeholders
