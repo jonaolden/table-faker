@@ -1,13 +1,22 @@
 import argparse
+from pathlib import Path
 from . import tablefaker
 from . import relationships
 from . import semantic_view
 from . import semantic_model_metrics
+from . import util
+from .streaming_server import StreamingServer
 
 def main():
     parser = argparse.ArgumentParser(description=get_description())
     parser.add_argument('--config', required=False, help='Config yaml file path (required for data generation, relationships, and semantic views)')
-    parser.add_argument('--file_type', required=False, help='Target file type (csv,json,parquet,excel)')
+    parser.add_argument(
+        '--file_type',
+        required=False,
+        choices=['csv', 'json', 'parquet', 'excel', 'sql', 'deltalake', 'streaming'],
+        default='csv',
+        help='Target file type (csv, json, parquet, excel, sql, deltalake, streaming). Use "streaming" to start the streaming server.'
+    )
     parser.add_argument('--target', required=False, help='Target folder/file')
     parser.add_argument('--seed', type=int, required=False, help='Override seed value for deterministic output')
     parser.add_argument('--infer-attrs', type=str, required=False, choices=['true', 'false'], help='Override infer_entity_attrs_by_name (true/false)')
@@ -64,7 +73,16 @@ def main():
         )
         print(f"Generated {num_metrics} business metrics written to {out}")
     elif isinstance(config_source, str):
-        if args.relationships:
+        # Special-case: streaming server mode
+        if file_type == 'streaming':
+            # Start the streaming server which will continuously generate data.
+            # target can be an output directory; if omitted, defaults to current directory.
+            cfg_path = Path(config_source)
+            out_path = Path(target_file_path) if target_file_path is not None else Path('.')
+            util.log(f"Starting streaming server with config={cfg_path} output={out_path}", util.FOREGROUND_COLOR.CYAN)
+            server = StreamingServer(cfg_path, out_path)
+            server.start()  # Blocks until Ctrl+C
+        elif args.relationships:
             out = relationships.generate_relationships(config_source, target_file_path)
             print(f"Relationships written to {out}")
         elif hasattr(args, 'semantic_view') and args.semantic_view:

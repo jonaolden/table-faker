@@ -145,3 +145,4 @@ domains/*/output
 
 ./delta_tables
 delta_tables
+samples/*/output

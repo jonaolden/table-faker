@@ -77,6 +77,24 @@ class Config:
                 
                 if "data" not in column:
                     raise Exception(f"{table_name} table {column_name} column do not have a data attribute")
+            
+            # Validate update_policy
+            if "update_policy" in table:
+                policy = table["update_policy"]
+                valid_policies = ["append", "disabled", "postprocess"]
+                if policy not in valid_policies:
+                    raise Exception(
+                        f"{table_name}: update_policy must be one of {valid_policies}, got '{policy}'"
+                    )
+                
+                # Validate postprocess_mode if update_policy is postprocess
+                if policy == "postprocess" and "postprocess_mode" in table:
+                    mode = table["postprocess_mode"]
+                    valid_modes = ["replace", "append"]
+                    if mode not in valid_modes:
+                        raise Exception(
+                            f"{table_name}: postprocess_mode must be one of {valid_modes}, got '{mode}'"
+                        )
         
         #util.log(f"config file is validated")
 

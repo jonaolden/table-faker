@@ -70,7 +70,56 @@ python streaming_server.py --config streaming_config.yaml --output ./delta_table
 
 - **`append`**: Continuously add new rows (recommended for event/log tables)
 - **`disabled`**: Never update (for static reference tables like countries)
+- **`postprocess`**: Generate after each streaming cycle (for aggregates/derived tables)
 - **`replace`**: Full table replacement each cycle (not yet implemented)
+
+### Postprocess Tables
+
+Postprocess tables are derived/aggregate tables that depend on streaming data. They are regenerated after each streaming cycle completes, ensuring they always reflect the latest data.
+
+#### Postprocess Modes
+
+- **`replace`** (default): Delete and regenerate the entire table each cycle (single source of truth)
+- **`append`**: Keep historical snapshots and add new aggregation alongside old data
+
+#### Example: Monthly Aggregate Table
+
+```yaml
+tables:
+  - table_name: reservation
+    update_policy: append
+    cadence:
+      rows_per_minute: 120
+    # ... reservation columns
+  
+  - table_name: room_monthly_aggregate
+    update_policy: postprocess      # NEW: runs after each cycle
+    postprocess_mode: replace        # Optional: default is 'replace'
+    row_count: hotel_custom_calendar_utils.room_month_len(get_table)
+    columns:
+      - column_name: hotel_id
+        data: hotel_custom_calendar_utils.room_month_row(get_table, row_id - 1).get("hotel_id")
+      - column_name: room_id
+        data: hotel_custom_calendar_utils.room_month_row(get_table, row_id - 1).get("room_id")
+      - column_name: month
+        data: hotel_custom_calendar_utils.room_month_row(get_table, row_id - 1).get("month")
+      # ... more aggregate columns
+```
+
+#### Execution Flow
+
+1. All streaming (`append`) tables generate one batch
+2. All threads synchronize at cycle barrier
+3. One thread triggers postprocess execution
+4. All `postprocess` tables regenerate in dependency order
+5. Next cycle begins
+
+#### Use Cases
+
+- **Monthly/daily aggregates**: Summarize streaming transactions
+- **Denormalized views**: Join multiple streaming tables
+- **Computed metrics**: Calculate derived values from streaming data
+- **Snapshot tables**: Capture point-in-time state
 
 ### Example: Multi-table with Different Cadences
 

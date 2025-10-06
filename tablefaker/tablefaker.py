@@ -104,7 +104,14 @@ class TableFaker:
                 export_file_row_count = math.ceil(row_count / export_file_count)
             
 
-            if path.isdir(target_file_path) or file_type == "deltalake":
+            # Check if target is a directory (exists or ends with path separator)
+            is_directory = path.isdir(target_file_path) or target_file_path.endswith(('/', '\\'))
+            
+            if is_directory or file_type == "deltalake":
+                # Create directory if it doesn't exist
+                if is_directory and not path.exists(target_file_path):
+                    import os
+                    os.makedirs(target_file_path, exist_ok=True)
 
                 if file_type == "deltalake" and table["table_name"] == table_name and not path.exists(target_file_path) and path.exists(path.dirname(path.normpath(target_file_path)) + "/"):
                     # in delta lake format, if the latest folder does not exists, assume it is requested delta lake folder

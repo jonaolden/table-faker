@@ -46,6 +46,59 @@ except ImportError:
     sys.exit(1)
 
 
+class CycleBarrier:
+    """
+    Synchronization barrier for coordinating streaming cycle completion.
+    When all threads reach the barrier, one thread is designated to run postprocess.
+    """
+    
+    def __init__(self, num_threads):
+        """
+        Args:
+            num_threads: Number of streaming threads to wait for
+        """
+        self.num_threads = num_threads
+        self.counter = 0
+        self.cycle_number = 0
+        self.lock = threading.Lock()
+        self.condition = threading.Condition(self.lock)
+        self.timeout_seconds = 60  # Prevent deadlock
+        
+        util.log(f"CycleBarrier initialized for {num_threads} threads",
+                util.FOREGROUND_COLOR.CYAN)
+    
+    def wait(self) -> bool:
+        """
+        Wait at barrier until all threads arrive.
+        
+        Returns:
+            True if this thread should trigger postprocess execution
+            False otherwise
+        """
+        with self.condition:
+            self.counter += 1
+            
+            if self.counter == self.num_threads:
+                # Last thread to arrive - trigger postprocess
+                self.cycle_number += 1
+                util.log(f"Cycle {self.cycle_number} completed by all threads",
+                        util.FOREGROUND_COLOR.GREEN)
+                self.counter = 0
+                self.condition.notify_all()
+                return True  # This thread runs postprocess
+            else:
+                # Wait for other threads
+                self.condition.wait(timeout=self.timeout_seconds)
+                
+                # Check if we timed out
+                if self.counter > 0:
+                    util.log(f"CycleBarrier timeout - possible thread failure",
+                            util.FOREGROUND_COLOR.YELLOW)
+                    self.counter = 0  # Reset to prevent deadlock
+                
+                return False
+
+
 class StreamingTableGenerator:
     """Manages streaming data generation for a single table."""
     
@@ -74,8 +127,12 @@ class StreamingTableGenerator:
         self.running = False
         self.thread = None
         
+        # Cycle coordination
+        self.cycle_barrier = None  # Set by StreamingServer
+        self.server = None  # Reference to StreamingServer for postprocess callback
+        
         util.log(f"[{self.table_name}] Configured: {self.rows_per_minute} rows/min, "
-                f"{self.rows_per_tick} rows per {self.tick_interval}s tick", 
+                f"{self.rows_per_tick} rows per {self.tick_interval}s tick",
                 util.FOREGROUND_COLOR.CYAN)
     
     def load_existing_data(self):
@@ -178,20 +235,40 @@ class StreamingTableGenerator:
     
     def run_loop(self):
         """Main loop that generates batches at the configured interval."""
-        util.log(f"[{self.table_name}] Starting generation loop", 
+        util.log(f"[{self.table_name}] Starting generation loop",
                 util.FOREGROUND_COLOR.GREEN)
         
         while self.running:
-            start_time = time.time()
-            
-            self.generate_and_append_batch()
-            
-            # Sleep for remaining interval time
-            elapsed = time.time() - start_time
-            sleep_time = max(0, self.tick_interval - elapsed)
-            
-            if sleep_time > 0:
-                time.sleep(sleep_time)
+            try:
+                start_time = time.time()
+                
+                # Generate and append batch
+                self.generate_and_append_batch()
+                
+                # Wait at cycle barrier if coordinating
+                if self.cycle_barrier is not None:
+                    should_trigger_postprocess = self.cycle_barrier.wait()
+                    
+                    if should_trigger_postprocess and self.server is not None:
+                        # This thread won the race - trigger postprocess
+                        util.log(f"[{self.table_name}] Triggering postprocess execution",
+                                util.FOREGROUND_COLOR.CYAN)
+                        self.server.execute_postprocess_tables()
+                
+                # Sleep for remaining interval time
+                elapsed = time.time() - start_time
+                sleep_time = max(0, self.tick_interval - elapsed)
+                
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+                    
+            except Exception as e:
+                util.log(f"[{self.table_name}] Error in streaming loop: {e}",
+                        util.FOREGROUND_COLOR.RED)
+                # Continue running despite errors
+        
+        util.log(f"[{self.table_name}] Thread stopped",
+                util.FOREGROUND_COLOR.YELLOW)
     
     def start(self):
         """Start the generation thread."""
@@ -255,6 +332,17 @@ class StreamingServer:
         # Order generators deterministically based on FK dependencies (parents before children)
         # actual ordering logic is implemented as class methods outside __init__
         self.generators = self._order_generators()
+        
+        # Track postprocess tables
+        self.postprocess_tables = [g for g in self.generators
+                                   if g.update_policy == 'postprocess']
+        
+        if self.postprocess_tables:
+            util.log(f"Found {len(self.postprocess_tables)} postprocess tables",
+                    util.FOREGROUND_COLOR.CYAN)
+        
+        # Cycle barrier for coordinating streaming cycles
+        self.cycle_barrier = None
 
         # Set up signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -262,7 +350,7 @@ class StreamingServer:
 
         self.running = False
     def _extract_dependencies(self):
-        """Return dict table_name -> set(parent_table_names) parsed from foreign_key calls."""
+        """Return dict table_name -> set(parent_table_names) parsed from foreign_key and copy_from_fk calls."""
         tables = self.configurator.config.get('tables', [])
         deps = {}
         for t in tables:
@@ -270,6 +358,7 @@ class StreamingServer:
             deps.setdefault(name, set())
             for col in t.get('columns', []):
                 cmd = str(col.get('data', ''))
+                # Check for foreign_key() dependencies
                 if 'foreign_key(' in cmd:
                     try:
                         idx = cmd.find('foreign_key(')
@@ -279,6 +368,20 @@ class StreamingServer:
                             parsed = eval(f"({args_str})")
                             if len(parsed) >= 1:
                                 parent = parsed[0]
+                                deps[name].add(parent)
+                    except Exception:
+                        # ignore parse errors here
+                        pass
+                # ALSO check for copy_from_fk() dependencies
+                if 'copy_from_fk(' in cmd:
+                    try:
+                        idx = cmd.find('copy_from_fk(')
+                        end_idx = cmd.find(')', idx)
+                        if end_idx != -1:
+                            args_str = cmd[idx + len('copy_from_fk('):end_idx]
+                            parsed = eval(f"({args_str})")
+                            if len(parsed) >= 2:
+                                parent = parsed[1]  # second arg is the parent table name
                                 deps[name].add(parent)
                     except Exception:
                         # ignore parse errors here
@@ -340,32 +443,64 @@ class StreamingServer:
         util.log(f"Starting streaming server with {len(self.generators)} tables",
                 util.FOREGROUND_COLOR.GREEN)
         
-        # Load existing data into caches first
+        # 1. Load existing data into caches first
         for generator in self.generators:
             generator.load_existing_data()
         
-        # Generate initial batch for parent tables (those with no FK dependencies)
-        # This ensures their primary key caches are populated before children start
+        # 2. Generate initial data for ALL tables with update_policy='disabled'
         deps = self._extract_dependencies()
         for generator in self.generators:
-            if generator.update_policy != 'disabled' and generator.enabled:
-                # Check if this table has no dependencies (is a parent/root table)
+            if generator.update_policy == 'disabled':
+                # Check dependencies (existing logic)
                 table_deps = deps.get(generator.table_name, set())
-                if not table_deps and generator.table_name not in self.table_faker.primary_key_cache:
-                    util.log(f"[{generator.table_name}] Generating initial batch to populate cache before starting threads",
-                            util.FOREGROUND_COLOR.CYAN)
-                    generator.generate_and_append_batch()
+                missing_deps = [dep for dep in table_deps
+                               if dep not in self.table_faker.primary_key_cache]
+                
+                if missing_deps:
+                    util.log(f"[{generator.table_name}] Skipping - depends on {missing_deps}",
+                            util.FOREGROUND_COLOR.YELLOW)
+                    continue
+                
+                # Generate full table
+                util.log(f"[{generator.table_name}] Generating static data (update_policy=disabled)",
+                        util.FOREGROUND_COLOR.CYAN)
+                original_row_count = generator.table_config.get('row_count', 100)
+                original_rows_per_tick = generator.rows_per_tick
+                generator.rows_per_tick = original_row_count
+                generator.generate_and_append_batch()
+                generator.rows_per_tick = original_rows_per_tick
         
-        # Now start all generator threads in dependency order
+        # 3. Create cycle barrier for streaming tables (if any)
+        streaming_gens = [g for g in self.generators
+                         if g.update_policy == 'append' and g.enabled]
+        
+        if len(streaming_gens) > 0:
+            self.cycle_barrier = CycleBarrier(len(streaming_gens))
+            
+            # Assign barrier and server reference to each streaming generator
+            for gen in streaming_gens:
+                gen.cycle_barrier = self.cycle_barrier
+                gen.server = self
+        
+        # 4. Generate initial batch for streaming parent tables
+        for generator in streaming_gens:
+            table_deps = deps.get(generator.table_name, set())
+            if not table_deps and generator.table_name not in self.table_faker.primary_key_cache:
+                util.log(f"[{generator.table_name}] Generating initial batch",
+                        util.FOREGROUND_COLOR.CYAN)
+                generator.generate_and_append_batch()
+        
+        # 5. Start all generator threads (append tables only)
         for generator in self.generators:
-            generator.start()
+            if generator.update_policy == 'append' and generator.enabled:
+                generator.start()
         
         self.running = True
         
-        # Main thread keeps running
-        util.log("Server is running. Press Ctrl+C to stop.", 
+        util.log("Server running. Postprocess tables will execute after first cycle.",
                 util.FOREGROUND_COLOR.GREEN)
         
+        # Main thread keeps running
         try:
             while self.running:
                 time.sleep(1)
@@ -373,6 +508,130 @@ class StreamingServer:
             pass
         
         self.stop()
+    
+    def execute_postprocess_tables(self):
+        """
+        Execute all postprocess tables in dependency order.
+        Called by streaming threads after cycle completion.
+        """
+        if not self.postprocess_tables:
+            return
+        
+        util.log(f"Executing {len(self.postprocess_tables)} postprocess tables",
+                util.FOREGROUND_COLOR.CYAN)
+        
+        deps = self._extract_dependencies()
+        
+        for generator in self.postprocess_tables:
+            try:
+                table_name = generator.table_name
+                
+                # Check if all dependencies are met
+                table_deps = deps.get(table_name, set())
+                missing_deps = [dep for dep in table_deps
+                               if dep not in self.table_faker.primary_key_cache]
+                
+                if missing_deps:
+                    util.log(f"[{table_name}] Skipping postprocess - missing deps: {missing_deps}",
+                            util.FOREGROUND_COLOR.YELLOW)
+                    continue
+                
+                # Determine postprocess mode (replace or append)
+                postprocess_mode = generator.table_config.get('postprocess_mode', 'replace')
+                
+                if postprocess_mode == 'replace':
+                    # Delete existing data before regenerating
+                    if generator.output_path.exists():
+                        util.log(f"[{table_name}] Replacing existing data (postprocess_mode=replace)",
+                                util.FOREGROUND_COLOR.CYAN)
+                        # Delete the Delta table directory
+                        import shutil
+                        shutil.rmtree(generator.output_path)
+                        generator.output_path.mkdir(parents=True, exist_ok=True)
+                        
+                        # Clear from caches
+                        if table_name in self.table_faker.primary_key_cache:
+                            del self.table_faker.primary_key_cache[table_name]
+                        if table_name in self.table_faker.parent_rows:
+                            del self.table_faker.parent_rows[table_name]
+                        
+                        # Reset row_id
+                        generator.current_row_id = generator.table_config.get('start_row_id', 1)
+                
+                # Generate full table
+                util.log(f"[{table_name}] Generating postprocess table (mode={postprocess_mode})",
+                        util.FOREGROUND_COLOR.CYAN)
+                
+                original_rows_per_tick = generator.rows_per_tick
+                row_count_config = generator.table_config.get('row_count', 100)
+                
+                # Evaluate row_count if it's a string expression
+                if isinstance(row_count_config, str):
+                    # Create variables context for evaluation
+                    import sys
+                    from pathlib import Path
+                    import importlib
+                    
+                    # Add config directory to path
+                    config_dir = Path(self.config_path).parent
+                    if str(config_dir) not in sys.path:
+                        sys.path.insert(0, str(config_dir))
+                    
+                    variables = {}
+                    # get_table should return a list of row dicts for the table
+                    def get_table_func(table_name):
+                        """Return all rows for a table as a list of dicts."""
+                        table_dict = self.table_faker.parent_rows.get(table_name, {})
+                        # Convert dict of {pk_value: row_dict} to list of row_dicts
+                        return list(table_dict.values()) if table_dict else []
+                    variables['get_table'] = get_table_func
+                    
+                    # Import any modules referenced in the expression
+                    # Look for module names before dots (e.g., "hotel_custom_calendar_utils.room_month_len")
+                    import re
+                    module_names = re.findall(r'([a-zA-Z_][a-zA-Z0-9_]*)\s*\.', row_count_config)
+                    for module_name in set(module_names):
+                        try:
+                            module = importlib.import_module(module_name)
+                            variables[module_name] = module
+                        except ImportError:
+                            pass
+                    
+                    try:
+                        row_count = eval(row_count_config, variables)
+                        util.log(f"[{table_name}] Evaluated row_count expression: {row_count_config} => {row_count}",
+                                util.FOREGROUND_COLOR.CYAN)
+                    except Exception as e:
+                        util.log(f"[{table_name}] Error evaluating row_count expression '{row_count_config}': {e}",
+                                util.FOREGROUND_COLOR.RED)
+                        row_count = 100  # fallback
+                else:
+                    row_count = row_count_config
+                
+                # Ensure row_count is an integer
+                if not isinstance(row_count, int):
+                    util.log(f"[{table_name}] row_count is not an integer ({type(row_count)}), converting",
+                            util.FOREGROUND_COLOR.YELLOW)
+                    row_count = int(row_count)
+                
+                generator.rows_per_tick = row_count
+                
+                generator.generate_and_append_batch()
+                
+                generator.rows_per_tick = original_rows_per_tick
+                
+                # Reset row_id after generation for replace mode
+                if postprocess_mode == 'replace':
+                    generator.current_row_id = generator.table_config.get('start_row_id', 1)
+                
+                util.log(f"[{table_name}] Postprocess complete ({row_count} rows)",
+                        util.FOREGROUND_COLOR.GREEN)
+                
+            except Exception as e:
+                util.log(f"[{generator.table_name}] Postprocess failed: {e}",
+                        util.FOREGROUND_COLOR.RED)
+                import traceback
+                util.log(traceback.format_exc(), util.FOREGROUND_COLOR.RED)
     
     def stop(self):
         """Stop all table generators."""

@@ -25,11 +25,11 @@ CLI flags (see `tablefaker --help` for full list):
 - `--config <PATH>` (required)
   Path to your YAML config file. See [`docs/yaml-reference.md`](docs/yaml-reference.md:1) for full schema and examples.
 
-- `--file_type <extension>` (choices: csv, json, parquet, excel, sql, deltalake) (default: csv)
-  Output file format to generate.
+- `--file_type <extension>` (choices: csv, json, parquet, excel, sql, deltalake, streaming) (default: csv)
+  Output file format to generate. Use `streaming` to run TableFaker's streaming server instead of writing files.
 
-- `--target <PATH|DIR>`
-  Output destination. If a directory is provided, multiple files will be written into it; if a single file path is provided, output will be written to that file.
+- `--target <PATH|DIR|HOST:PORT>`
+  Output destination. If a directory is provided, multiple files will be written into it; if a single file path is provided, output will be written to that file. When using `file_type=streaming`, `--target` can be used to specify the host:port to bind the streaming server (see [`docs/streaming-server.md`](docs/streaming-server.md:1) for configuration details).
 
 - `--seed <INT>`
   Use a numeric seed to make generation deterministic and reproducible.
